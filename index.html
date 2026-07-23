@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Static Markdown Editor</title>
+
+    <!-- Parser, Sanitizer, Highlighter, and PDF Exporter -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.5/purify.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" id="hljs-theme">
+
+    <!-- CodeMirror 5 Base -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/monokai.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/markdown/markdown.min.js"></script>
+
+    <!-- CodeMirror 5 Search & Replace Add-ons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/dialog/dialog.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/dialog/dialog.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/searchcursor.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/search.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #f4f4f5;
+            --header-bg: #ffffff;
+            --border-color: #e4e4e7;
+            --text-main: #27272a;
+            --text-muted: #71717a;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --export-btn: #10b981;
+            --export-btn-hover: #059669;
+        }
+
+        body.dark-mode {
+            --bg-color: #18181b;
+            --header-bg: #27272a;
+            --border-color: #3f3f46;
+            --text-main: #e4e4e7;
+            --text-muted: #a1a1aa;
+        }
+
+        body, html {
+            margin: 0; padding: 0; height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            background-color: var(--header-bg); padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+        }
+
+        input[type="text"] {
+            padding: 0.5rem; font-size: 1rem;
+            border: 1px solid var(--border-color); border-radius: 4px;
+            background: var(--header-bg); color: var(--text-main); width: 180px;
+        }
+
+        button {
+            padding: 0.5rem 1rem; font-size: 0.9rem;
+            border: none; border-radius: 4px;
+            background-color: var(--accent); color: white;
+            cursor: pointer; transition: background 0.2s;
+        }
+
+        button:hover { background-color: var(--accent-hover); }
+        button.btn-danger { background-color: var(--danger); }
+        button.btn-danger:hover { background-color: var(--danger-hover); }
+        button.btn-export { background-color: var(--export-btn); }
+        button.btn-export:hover { background-color: var(--export-btn-hover); }
+        button.btn-secondary { background-color: var(--header-bg); color: var(--text-main); border: 1px solid var(--border-color); }
+        button.btn-secondary:hover { background-color: var(--bg-color); }
+        button.btn-icon { background: none; color: var(--text-muted); padding: 0.25rem; font-size: 1.1rem; }
+        button.btn-icon:hover { color: var(--danger); background: none; }
+
+        .workspace { display: flex; flex: 1; overflow: hidden; }
+
+        .workspace.view-edit-only .preview-pane { display: none; }
+        .workspace.view-edit-only .resizer { display: none; }
+        .workspace.view-preview-only .editor-container { display: none; }
+        .workspace.view-preview-only .resizer { display: none; }
+
+        .sidebar {
+            width: 250px; background-color: var(--header-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex; flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar h3 { margin: 1rem; font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; }
+
+        .doc-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex: 1; }
+        .doc-item {
+            padding: 0.75rem 1rem; cursor: pointer;
+            border-bottom: 1px solid var(--border-color);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .doc-item.active { background-color: var(--bg-color); border-left: 3px solid var(--accent); padding-left: calc(1rem - 3px); }
+        .doc-item:hover { background-color: var(--bg-color); }
+        .doc-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+
+        .editor-container { flex: 1; display: flex; flex-direction: column; min-width: 200px; }
+        .CodeMirror { flex: 1; height: 100%; font-family: 'Courier New', monospace; font-size: 15px; }
+
+        .CodeMirror-dialog { background: var(--header-bg); color: var(--text-main); }
+        .CodeMirror-dialog input { background: var(--bg-color); color: var(--text-main); border: 1px solid var(--border-color); }
+
+        .resizer {
+            width: 5px; background-color: var(--border-color);
+            cursor: col-resize; transition: background 0.2s; flex-shrink: 0;
+        }
+        .resizer:hover, .resizer.active { background-color: var(--accent); }
+
+        .preview-pane {
+            flex: 1; padding: 2rem; background-color: var(--bg-color);
+            overflow-y: auto; line-height: 1.6; min-width: 200px;
+        }
+
+        .preview-pane img { max-width: 100%; border-radius: 4px; }
+        .preview-pane code { background: rgba(128,128,128,0.2); padding: 2px 4px; border-radius: 4px; }
+        .preview-pane pre code { background: transparent; padding: 0; }
+        .preview-pane blockquote { border-left: 4px solid var(--border-color); margin-left: 0; padding-left: 1rem; color: var(--text-muted); }
+        
+        #drop-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(59, 130, 246, 0.9); color: white;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2rem; z-index: 1000; opacity: 0; pointer-events: none;
+            transition: opacity 0.2s;
+        }
+        body.drag-over #drop-overlay { opacity: 1; pointer-events: all; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <input type="text" id="filename" placeholder="Document Name" value="Untitled">
+        <button onclick="newDocument()">New</button>
+        <button onclick="manualSave()">Save</button>
+        <button onclick="deleteCurrent()" class="btn-danger">Delete</button>
+        
+        <span style="border-left: 1px solid var(--border-color); margin: 0 4px; height: 24px;"></span>
+        
+        <button onclick="downloadDocument()" class="btn-export">Export .md</button>
+        <button onclick="exportPDF()" class="btn-export">Export PDF</button>
+
+        <span style="border-left: 1px solid var(--border-color); margin: 0 4px; height: 24px;"></span>
+
+        <button id="viewToggleBtn" onclick="toggleView()" class="btn-secondary" title="Cycle Editor Views">👁️ View: Split</button>
+        <button onclick="toggleDarkMode()" class="btn-secondary" style="margin-left: auto;" aria-label="Toggle Theme">🌓 Theme</button>
+        <span id="status" style="margin-left: 10px; font-size: 0.9rem; font-weight: 500;"></span>
+    </header>
+
+    <div class="workspace" id="workspace">
+        <div class="sidebar" id="sidebar">
+            <h3>Documents</h3>
+            <ul class="doc-list" id="docList"></ul>
+            <div style="padding: 1rem; font-size: 0.75rem; color: var(--text-muted); border-top: 1px solid var(--border-color);">
+                <strong>Shortcuts:</strong><br>
+                Ctrl+S: Save<br>
+                Ctrl+F: Find<br>
+                Shift+Ctrl+F: Replace<br>
+            </div>
+        </div>
+        
+        <div class="editor-container" id="editorPane">
+            <textarea id="editor"></textarea>
+        </div>
+
+        <div class="resizer" id="resizer"></div>
+        
+        <div class="preview-pane" id="preview"></div>
+    </div>
+
+    <div id="drop-overlay">Drop .md file to open</div>
+
+    <script>
+        // --- 1. Initialization & State ---
+        const preview = document.getElementById('preview');
+        const filenameInput = document.getElementById('filename');
+        const docList = document.getElementById('docList');
+        const statusSpan = document.getElementById('status');
+        const workspace = document.getElementById('workspace');
+        const viewToggleBtn = document.getElementById('viewToggleBtn');
+        const editorPane = document.getElementById('editorPane');
+        
+        let currentDocId = null;
+        let isDirty = false;
+        let isSaving = false; 
+        let suppressRender = false; // Prevents setValue() from triggering render
+        let statusTimeout; // Manages UI notification races
+        let viewState = parseInt(localStorage.getItem('viewState')) || 0; 
+        
+        const savedWidth = localStorage.getItem('editorWidth');
+        if (savedWidth) editorPane.style.width = savedWidth;
+
+        const cmEditor = CodeMirror.fromTextArea(document.getElementById('editor'), {
+            mode: 'markdown',
+            lineNumbers: true,
+            theme: localStorage.getItem('theme') === 'dark' ? 'monokai' : 'default',
+            lineWrapping: true,
+            extraKeys: {
+                "Ctrl-F": "findPersistent",
+                "Cmd-F": "findPersistent",
+                "Shift-Ctrl-F": "replace",
+                "Shift-Cmd-F": "replace",
+                "Ctrl-S": (cm) => { manualSave(); },
+                "Cmd-S": (cm) => { manualSave(); }
+            }
+        });
+
+        applyViewState(viewState);
+
+        // Global Save Override
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                manualSave();
+            }
+        });
+
+        // Tab Closure Protection
+        window.addEventListener('beforeunload', (e) => {
+            if (isDirty) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+
+        // --- 2. Core Rendering Engine ---
+        function renderPreview() {
+            const rawMarkdown = cmEditor.getValue();
+            const safeHtml = DOMPurify.sanitize(marked.parse(rawMarkdown));
+            preview.innerHTML = safeHtml;
+            
+            // Scoped specifically to the preview pane for minor performance gain
+            preview.querySelectorAll('pre code').forEach((block) => {
+                hljs.highlightElement(block);
+            });
+        }
+
+        let renderTimeout;
+        cmEditor.on('change', () => {
+            if (suppressRender) return;
+            isDirty = true;
+            clearTimeout(renderTimeout);
+            renderTimeout = setTimeout(renderPreview, 300);
+        });
+
+        cmEditor.on("scroll", (cm) => {
+            if (viewState !== 0) return;
+            const info = cm.getScrollInfo();
+            const scrollPercentage = info.top / (info.height - info.clientHeight);
+            if (!isNaN(scrollPercentage)) {
+                preview.scrollTop = scrollPercentage * (preview.scrollHeight - preview.clientHeight);
+            }
+        });
+
+        setInterval(() => { if (isDirty && !isSaving) saveDocument(true); }, 10000);
+
+        // --- 3. View Management ---
+        function toggleView() {
+            viewState = (viewState + 1) % 3;
+            localStorage.setItem('viewState', viewState);
+            applyViewState(viewState);
+        }
+
+        function applyViewState(state) {
+            workspace.classList.remove('view-edit-only', 'view-preview-only');
+            if (state === 1) {
+                workspace.classList.add('view-edit-only');
+                viewToggleBtn.textContent = "👁️ View: Edit";
+            } else if (state === 2) {
+                workspace.classList.add('view-preview-only');
+                viewToggleBtn.textContent = "👁️ View: Preview";
+            } else {
+                viewToggleBtn.textContent = "👁️ View: Split";
+            }
+            if (cmEditor) setTimeout(() => cmEditor.refresh(), 10);
+        }
+
+        // --- 4. Split Pane Resizing ---
+        const resizer = document.getElementById('resizer');
+        const sidebar = document.getElementById('sidebar');
+        let isResizing = false;
+
+        resizer.addEventListener('mousedown', () => { isResizing = true; resizer.classList.add('active'); });
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing || viewState !== 0) return;
+            const newWidth = e.clientX - sidebar.offsetWidth;
+            if (newWidth > 150 && newWidth < window.innerWidth - 200) {
+                editorPane.style.flex = "none";
+                editorPane.style.width = `${newWidth}px`;
+            }
+        });
+        document.addEventListener('mouseup', () => { 
+            if (isResizing) {
+                isResizing = false; 
+                resizer.classList.remove('active');
+                localStorage.setItem('editorWidth', editorPane.style.width);
+            }
+        });
+
+        // --- 5. Database Setup ---
+        const dbName = "MarkdownAppDB";
+        const storeName = "documents";
+        let db;
+
+        const request = indexedDB.open(dbName, 1);
+        
+        request.onerror = (e) => {
+            console.error("IndexedDB Error:", e);
+            showStatus("Database failed to load", true);
+        };
+
+        request.onblocked = () => {
+            alert("Database upgrade blocked. Please close other tabs of this application.");
+        };
+
+        request.onupgradeneeded = (e) => {
+            db = e.target.result;
+            if (!db.objectStoreNames.contains(storeName)) {
+                // Future-proofing: creating an index on updatedAt
+                const store = db.createObjectStore(storeName, { keyPath: "id" });
+                store.createIndex("updatedAt", "updatedAt", { unique: false });
+            }
+        };
+        
+        request.onsuccess = (e) => { 
+            db = e.target.result; 
+            
+            db.onversionchange = () => {
+                db.close();
+                console.warn("Database closed due to version change in another tab.");
+            };
+
+            loadDocumentList(); 
+            const lastDocId = localStorage.getItem('lastDocId');
+            if (lastDocId) openDocument(lastDocId);
+            else newDocument();
+        };
+
+        // --- 6. Document Management ---
+        function sanitizeFilename(name) {
+            return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'Untitled';
+        }
+
+        function newDocument() {
+            if (isDirty && !confirm("You have unsaved changes. Start new anyway?")) return;
+            currentDocId = null;
+            localStorage.removeItem('lastDocId');
+            filenameInput.value = "Untitled";
+            
+            suppressRender = true;
+            cmEditor.setValue("");
+            suppressRender = false;
+            
+            renderPreview();
+            isDirty = false;
+            
+            updateActiveSidebarItem();
+            showStatus("New document");
+        }
+
+        function manualSave() { saveDocument(false); }
+
+        function saveDocument(isAuto = false) {
+            if (!db || isSaving) return;
+            isSaving = true;
+
+            const isNewDoc = !currentDocId;
+            if (isNewDoc) currentDocId = crypto.randomUUID();
+            
+            const cleanName = sanitizeFilename(filenameInput.value);
+            filenameInput.value = cleanName;
+
+            const doc = {
+                id: currentDocId,
+                name: cleanName,
+                content: cmEditor.getValue(),
+                updatedAt: Date.now()
+            };
+
+            const tx = db.transaction([storeName], "readwrite");
+            
+            tx.oncomplete = () => {
+                isSaving = false;
+                isDirty = false;
+                localStorage.setItem('lastDocId', currentDocId);
+                showStatus(isAuto ? "Auto-saved" : "Saved manually");
+                
+                if (isNewDoc) {
+                    loadDocumentList();
+                } else {
+                    const li = document.getElementById(`sidebar-${currentDocId}`);
+                    if (li) {
+                        li.querySelector('.doc-name').textContent = cleanName;
+                        docList.prepend(li); 
+                    } else {
+                        loadDocumentList(); 
+                    }
+                }
+            };
+
+            tx.onerror = (e) => {
+                isSaving = false;
+                console.error(e);
+                showStatus("Error saving document", true);
+            };
+
+            tx.objectStore(storeName).put(doc);
+        }
+
+        function loadDocumentList() {
+            if (!db) return;
+            const tx = db.transaction([storeName], "readonly");
+            const store = tx.objectStore(storeName);
+            
+            // Utilizing the index if available (graceful fallback if upgraded from old version)
+            const request = store.indexNames.contains("updatedAt") 
+                ? store.index("updatedAt").getAll() 
+                : store.getAll();
+            
+            request.onsuccess = (e) => {
+                const docs = e.target.result.sort((a, b) => b.updatedAt - a.updatedAt);
+                docList.innerHTML = "";
+                docs.forEach(doc => {
+                    const li = document.createElement('li');
+                    li.className = 'doc-item';
+                    li.id = `sidebar-${doc.id}`;
+                    
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'doc-name';
+                    nameSpan.textContent = doc.name;
+                    nameSpan.onclick = () => openDocument(doc.id);
+                    
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'btn-icon';
+                    delBtn.innerHTML = '×';
+                    delBtn.title = "Delete";
+                    delBtn.setAttribute('aria-label', `Delete ${doc.name}`);
+                    delBtn.onclick = (event) => {
+                        event.stopPropagation();
+                        deleteDocument(doc.id, doc.name);
+                    };
+
+                    li.appendChild(nameSpan);
+                    li.appendChild(delBtn);
+                    docList.appendChild(li);
+                });
+                updateActiveSidebarItem();
+            };
+        }
+
+        function updateActiveSidebarItem() {
+            document.querySelectorAll('.doc-item').forEach(el => el.classList.remove('active'));
+            if (currentDocId) {
+                const activeItem = document.getElementById(`sidebar-${currentDocId}`);
+                if (activeItem) activeItem.classList.add('active');
+            }
+        }
+
+        function openDocument(id) {
+            if (isDirty && !confirm("You have unsaved changes. Open different file anyway?")) return;
+            
+            db.transaction([storeName], "readonly").objectStore(storeName).get(id).onsuccess = (e) => {
+                const doc = e.target.result;
+                if (doc) {
+                    currentDocId = doc.id;
+                    localStorage.setItem('lastDocId', id);
+                    filenameInput.value = doc.name;
+                    
+                    suppressRender = true;
+                    cmEditor.setValue(doc.content);
+                    suppressRender = false;
+                    
+                    renderPreview(); 
+                    isDirty = false;
+                    updateActiveSidebarItem();
+                    showStatus("Loaded");
+                }
+            };
+        }
+
+        function deleteCurrent() {
+            if (!currentDocId) return alert("No saved document to delete.");
+            deleteDocument(currentDocId, filenameInput.value);
+        }
+
+        function deleteDocument(id, name) {
+            if (!confirm(`Delete "${name}" permanently?`)) return;
+            db.transaction([storeName], "readwrite").objectStore(storeName).delete(id).onsuccess = () => {
+                if (id === currentDocId) {
+                    localStorage.removeItem('lastDocId');
+                    newDocument();
+                }
+                loadDocumentList();
+                showStatus("Deleted");
+            };
+        }
+
+        // --- 7. Import / Export ---
+        function downloadDocument() {
+            let filename = sanitizeFilename(filenameInput.value);
+            if (!filename.endsWith('.md')) filename += ".md";
+            
+            const blob = new Blob([cmEditor.getValue()], { type: "text/markdown" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = filename;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportPDF() {
+            showStatus("Generating PDF...");
+            let filename = sanitizeFilename(filenameInput.value) + ".pdf";
+            
+            const element = document.getElementById('preview');
+            const opt = {
+                margin:       0.5,
+                filename:     filename,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2 },
+                jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+            };
+
+            const isDark = document.body.classList.contains('dark-mode');
+            if (isDark) document.body.classList.remove('dark-mode');
+
+            html2pdf().set(opt).from(element).save()
+                .then(() => showStatus("PDF Exported"))
+                .catch((err) => {
+                    console.error("PDF Export failed", err);
+                    showStatus("PDF Export failed", true);
+                })
+                .finally(() => {
+                    if (isDark) document.body.classList.add('dark-mode');
+                });
+        }
+
+        // Drag and Drop
+        let dragCounter = 0;
+        window.addEventListener('dragenter', (e) => { 
+            e.preventDefault(); 
+            dragCounter++;
+            document.body.classList.add('drag-over'); 
+        });
+        window.addEventListener('dragleave', () => { 
+            dragCounter--;
+            if(dragCounter === 0) document.body.classList.remove('drag-over'); 
+        });
+        window.addEventListener('dragover', (e) => e.preventDefault());
+        
+        window.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            document.body.classList.remove('drag-over');
+            
+            const file = e.dataTransfer.files[0];
+            if (file && (file.name.endsWith('.md') || file.type === 'text/markdown' || file.type === 'text/plain')) {
+                if (isDirty && !confirm("Discard current changes to import?")) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    newDocument();
+                    filenameInput.value = sanitizeFilename(file.name.replace(/\.[^/.]+$/, ""));
+                    
+                    suppressRender = true;
+                    cmEditor.setValue(event.target.result);
+                    suppressRender = false;
+                    
+                    renderPreview();
+                    isDirty = false;
+                };
+                reader.readAsText(file);
+            } else {
+                alert("Please drop a valid .md or .txt file");
+            }
+        });
+
+        // --- 8. UI Polish & Theme ---
+        function toggleDarkMode() {
+            const isDark = document.body.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            
+            cmEditor.setOption("theme", isDark ? "monokai" : "default");
+            document.getElementById('hljs-theme').href = isDark 
+                ? "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css"
+                : "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css";
+            
+            // Allow CSS to fetch and apply before recalculating syntax colors
+            setTimeout(renderPreview, 50);
+        }
+
+        if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.body.classList.add('dark-mode');
+            document.getElementById('hljs-theme').href = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css";
+        }
+
+        function showStatus(msg, isError = false) {
+            clearTimeout(statusTimeout);
+            statusSpan.style.color = isError ? "var(--danger)" : "#10b981";
+            statusSpan.textContent = msg;
+            statusTimeout = setTimeout(() => { 
+                statusSpan.textContent = ""; 
+                statusSpan.style.color = "#10b981"; 
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
